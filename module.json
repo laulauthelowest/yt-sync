@@ -2,7 +2,7 @@
   "id": "yt-sync",
   "title": "YT Sync — YouTube for the Table",
   "description": "Stream YouTube videos synchronized to all players directly from Foundry VTT v14.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "compatibility": {
     "minimum": "13",
     "verified": "14"
