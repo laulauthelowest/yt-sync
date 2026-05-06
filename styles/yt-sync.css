@@ -1,0 +1,186 @@
+/* ============================================================
+   YT Sync — Styles
+   GM Control Panel + Player Overlay
+   ============================================================ */
+
+/* ── Overlay (all clients) ── */
+#yt-sync-overlay {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 9999;
+  width: 480px;
+  display: flex;
+  flex-direction: column;
+  background: #0d0d0d;
+  border: 1px solid #ff0000;
+  border-radius: 6px;
+  box-shadow: 0 0 24px rgba(255, 0, 0, 0.25), 0 4px 24px rgba(0,0,0,0.7);
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+#yt-sync-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #1a1a1a;
+  cursor: grab;
+  user-select: none;
+  border-bottom: 1px solid #333;
+}
+
+#yt-sync-drag-handle span {
+  color: #ff4444;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#yt-sync-close {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+}
+#yt-sync-close:hover { color: #fff; background: #c00; }
+
+#yt-sync-iframe-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+#yt-sync-iframe-wrap iframe,
+#yt-sync-player-target { width: 100%; height: 100%; }
+
+#yt-sync-vol-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #111;
+  border-top: 1px solid #222;
+}
+#yt-sync-vol-bar span { color: #aaa; font-size: 14px; }
+#yt-sync-volume {
+  flex: 1;
+  accent-color: #ff4444;
+}
+
+
+/* ── GM Control Panel ── */
+.yt-sync-gm-app .window-content {
+  padding: 0;
+  background: #141414;
+  color: #e0e0e0;
+}
+
+.yt-sync-gm-inner {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.yt-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.yt-field-row input {
+  flex: 1;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.yt-field-row input:focus { border-color: #ff4444; }
+
+/* ── Preview row ── */
+.yt-preview-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 8px;
+}
+.yt-preview-row img {
+  width: 100px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid #333;
+}
+.yt-meta { flex: 1; overflow: hidden; }
+.yt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.yt-vid-id { font-size: 11px; color: #666; margin-top: 2px; }
+
+/* ── Buttons ── */
+.yt-btn {
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: filter 0.15s, opacity 0.15s;
+}
+.yt-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.yt-btn:not(:disabled):hover { filter: brightness(1.2); }
+
+.yt-btn.primary { background: #cc0000; color: #fff; }
+.yt-btn.green   { background: #1a7a1a; color: #cfffcf; }
+.yt-btn.yellow  { background: #7a6a00; color: #fffdd0; }
+.yt-btn.red     { background: #7a1a1a; color: #ffd0d0; }
+
+.yt-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Volume row ── */
+.yt-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #aaa;
+}
+.yt-volume-row input[type="range"] {
+  flex: 1;
+  accent-color: #ff4444;
+}
+#yt-vol-label { min-width: 28px; text-align: right; color: #fff; font-weight: 700; }
+
+/* ── Status ── */
+.yt-status {
+  font-size: 12px;
+  color: #888;
+  border-top: 1px solid #222;
+  padding-top: 8px;
+  min-height: 18px;
+}

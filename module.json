@@ -1,0 +1,33 @@
+{
+  "id": "yt-sync",
+  "title": "YT Sync — YouTube for the Table",
+  "description": "Stream YouTube videos synchronized to all players directly from Foundry VTT v14.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "authors": [
+    {
+      "name": "Your Name"
+    }
+  ],
+  "esmodules": ["scripts/main.mjs"],
+  "styles": ["styles/yt-sync.css"],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    },
+    {
+      "lang": "de",
+      "name": "Deutsch",
+      "path": "lang/de.json"
+    }
+  ],
+  "socket": true,
+  "url": "https://github.com/laulauthelowest/yt-sync",
+  "manifest": "https://raw.githubusercontent.com/laulauthelowest/yt-sync/main/module.json",
+  "download": "https://github.com/laulauthelowest/yt-sync/releases/latest/download/yt-sync.zip"
+}
