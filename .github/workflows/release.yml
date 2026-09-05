@@ -47,9 +47,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          files: yt-sync.zip
           name: "YT Sync ${{ github.ref_name }}"
           body: |
             ## YT Sync ${{ github.ref_name }}
-
             ### Installation in Foundry VTT
             Manifest-URL in Foundry einfügen:
