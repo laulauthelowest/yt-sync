@@ -11,6 +11,14 @@ const MODULE_ID = "yt-sync";
 
 const SOUND_PALETTE = ["#2b6cb0", "#2f855a", "#b7791f", "#6b46c1", "#c53030", "#00838f", "#975a16", "#4a5568"];
 
+function hexToRgba(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function extractVideoId(input) {
   try {
     const url = new URL(input);
@@ -27,6 +35,28 @@ async function savePlaylists(list) { await game.settings.set(MODULE_ID, "playlis
 
 function getSoundboard() { return game.settings.get(MODULE_ID, "soundboard") ?? []; }
 async function saveSoundboard(list) { await game.settings.set(MODULE_ID, "soundboard", list); }
+
+/**
+ * Persistenter GM-Sitzungszustand — bewusst AUSSERHALB der Klasse, auf
+ * Modul-Ebene. ApplicationV2-Instanzen (inkl. all ihrer lokalen Variablen
+ * in _onRender) werden beim Schließen des Fensters zerstört; dieses Objekt
+ * überlebt das, solange die Foundry-Seite nicht neu geladen wird — genau
+ * wie YTSyncPlayer seinen eigenen Zustand modul-scoped hält.
+ */
+const gmState = {
+  currentVideoId: null,
+  currentLabel: null,
+  currentThumb: null,
+  mode: "video",
+  volume: null,          // wird beim ersten Render aus defaultVolume befüllt
+  ambienceVolume: null,  // dito
+  playlistQueue: [],
+  playlistIdx: 0,
+  loopQueue: false,
+  activeSoundId: null,
+  playlistTimer: null,   // Interval-ID — nur EINE darf je aktiv sein
+  seekTimer: null,       // dito
+};
 
 export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
@@ -195,12 +225,6 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
 
   _onRender(_context, _options) {
     const el = this.element;
-    let currentVideoId = null;
-    let _playlistQueue = [];
-    let _playlistIdx   = 0;
-    let _playlistTimer = null;
-    let _loopQueue     = false;
-    let _activeSoundId = null;
 
     const playBtn    = el.querySelector("#yt-play-btn");
     const pauseBtn   = el.querySelector("#yt-pause-btn");
@@ -221,27 +245,7 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
     const queueList      = el.querySelector("#yt-queue-list");
     const ambienceVol      = el.querySelector("#yt-ambience-vol");
     const ambienceVolLabel = el.querySelector("#yt-ambience-vol-label");
-
-    // Startwert der Lautstärke aus der persönlichen Default-Einstellung —
-    // gilt nur beim allerersten Öffnen der Session, nicht bei jedem Trackwechsel.
-    const savedDefault = game.settings.get(MODULE_ID, "defaultVolume") ?? 50;
-    volSlider.value = savedDefault;
-    volLabel.textContent = savedDefault;
-
-    // Update seek bar every second while playing
-    let _seekInterval = null;
-    function startSeekUpdater() {
-      clearInterval(_seekInterval);
-      _seekInterval = setInterval(() => {
-        const cur = YTSyncPlayer.getCurrentTime();
-        const dur = YTSyncPlayer.getDuration();
-        if (!dur) return;
-        seekBar.max = Math.floor(dur);
-        seekBar.value = Math.floor(cur);
-        seekLabel.textContent = formatTime(cur) + " / " + formatTime(dur);
-      }, 1000);
-    }
-    function stopSeekUpdater() { clearInterval(_seekInterval); }
+    const soundboardGrid = el.querySelector("#yt-soundboard-grid");
 
     const setStatus = (msg) => statusEl.textContent = msg;
     const enableControls = (on) => {
@@ -249,6 +253,53 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       if (seekBar) seekBar.disabled = !on;
     };
     const getMode = () => el.querySelector("input[name='yt-mode']:checked")?.value ?? "video";
+
+    // ── Seek-Bar-Updater — nur EIN Timer darf laufen, überlebt Fenster-Reopen ──
+    function startSeekUpdater() {
+      if (gmState.seekTimer) return; // läuft schon, nicht doppelt starten
+      gmState.seekTimer = setInterval(() => {
+        const cur = YTSyncPlayer.getCurrentTime();
+        const dur = YTSyncPlayer.getDuration();
+        if (!dur) return;
+        const bar = document.getElementById("yt-seek-bar");
+        const lbl = document.getElementById("yt-seek-label");
+        if (!bar || !lbl) return; // Panel gerade geschlossen — Timer läuft weiter, UI wird beim nächsten Öffnen aktualisiert
+        bar.max = Math.floor(dur);
+        bar.value = Math.floor(cur);
+        lbl.textContent = formatTime(cur) + " / " + formatTime(dur);
+      }, 1000);
+    }
+    function stopSeekUpdater() { clearInterval(gmState.seekTimer); gmState.seekTimer = null; }
+
+    // ── Zustand wiederherstellen (Fenster geschlossen ≠ Wiedergabe gestoppt) ──
+    if (gmState.volume === null) gmState.volume = game.settings.get(MODULE_ID, "defaultVolume") ?? 50;
+    if (gmState.ambienceVolume === null) gmState.ambienceVolume = 50;
+
+    volSlider.value = gmState.volume;
+    volLabel.textContent = gmState.volume;
+    ambienceVol.value = gmState.ambienceVolume;
+    ambienceVolLabel.textContent = gmState.ambienceVolume;
+    loopToggle.checked = gmState.loopQueue;
+    const modeRadio = el.querySelector(`input[name='yt-mode'][value='${gmState.mode}']`);
+    if (modeRadio) modeRadio.checked = true;
+    modeHint.textContent = gmState.mode === "audio"
+      ? "Spieler hören nur den Ton — kein Video-Overlay sichtbar."
+      : "Spieler sehen das Video-Overlay.";
+
+    if (gmState.currentVideoId) {
+      el.querySelector("#yt-thumb").src = gmState.currentThumb ?? `https://img.youtube.com/vi/${gmState.currentVideoId}/mqdefault.jpg`;
+      el.querySelector("#yt-title").textContent = gmState.currentLabel || gmState.currentVideoId;
+      el.querySelector("#yt-vid-id").textContent = `ID: ${gmState.currentVideoId}`;
+      previewRow.style.display = "flex";
+      enableControls(true);
+      const state = YTSyncPlayer.getPlayerState();
+      setStatus(state === 2 ? "⏸ Pausiert" : state === 1 || state === 3 ? "▶ Läuft für alle…" : "✓ Bereit.");
+      if (state === 1 || state === 3) startSeekUpdater();
+    }
+
+    if (gmState.activeSoundId) {
+      soundboardGrid.querySelector(`.yt-sound-btn[data-id="${gmState.activeSoundId}"]`)?.classList.add("active");
+    }
 
     // ── Tab Switch ──
     el.querySelectorAll(".yt-tab").forEach(tab => {
@@ -263,7 +314,8 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
     // ── Modus ──
     el.querySelectorAll("input[name='yt-mode']").forEach(r => {
       r.addEventListener("change", () => {
-        modeHint.textContent = getMode() === "audio"
+        gmState.mode = getMode();
+        modeHint.textContent = gmState.mode === "audio"
           ? "Spieler hören nur den Ton — kein Video-Overlay sichtbar."
           : "Spieler sehen das Video-Overlay.";
       });
@@ -271,8 +323,10 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
 
     // ── Video in Vorschau laden ──
     const loadVideo = (vid, label, thumbUrl) => {
-      currentVideoId = vid;
-      el.querySelector("#yt-thumb").src = thumbUrl ?? `https://img.youtube.com/vi/${vid}/mqdefault.jpg`;
+      gmState.currentVideoId = vid;
+      gmState.currentLabel = label;
+      gmState.currentThumb = thumbUrl ?? `https://img.youtube.com/vi/${vid}/mqdefault.jpg`;
+      el.querySelector("#yt-thumb").src = gmState.currentThumb;
       el.querySelector("#yt-title").textContent = label || "Video geladen";
       el.querySelector("#yt-vid-id").textContent = `ID: ${vid}`;
       previewRow.style.display = "flex";
@@ -337,13 +391,13 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
 
     // ── Playlist hinzufügen ──
     el.querySelector("#yt-save-btn").addEventListener("click", async () => {
-      if (!currentVideoId) return;
+      if (!gmState.currentVideoId) return;
       const playlists = getPlaylists();
       const idx = parseInt(el.querySelector("#yt-target-playlist").value);
       if (isNaN(idx) || !playlists[idx]) return setStatus("⚠ Bitte zuerst eine Playlist wählen.");
       const label = prompt(`Name für dieses Video in "${playlists[idx].name}" (optional):`, el.querySelector("#yt-title").textContent) ?? "";
-      if (playlists[idx].videos.find(v => v.id === currentVideoId)) return setStatus("⚠ Video bereits in dieser Playlist.");
-      playlists[idx].videos.push({ id: currentVideoId, label: label || currentVideoId, thumb: el.querySelector("#yt-thumb").src });
+      if (playlists[idx].videos.find(v => v.id === gmState.currentVideoId)) return setStatus("⚠ Video bereits in dieser Playlist.");
+      playlists[idx].videos.push({ id: gmState.currentVideoId, label: label || gmState.currentVideoId, thumb: el.querySelector("#yt-thumb").src });
       await savePlaylists(playlists);
       refreshPlaylists(el);
       setStatus(`✓ Video zu "${playlists[idx].name}" hinzugefügt.`);
@@ -359,58 +413,65 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       refreshPlaylists(el);
     });
 
-    // ── Live-Queue: rendern ──
+    // ── Live-Queue: rendern (liest/schreibt gmState, nicht lokale Variablen) ──
     function renderQueue() {
-      if (!_playlistQueue.length) {
-        queueSection.style.display = "none";
-        queueNav.style.display = "none";
-        queueList.innerHTML = "";
+      const liveQueueList = document.getElementById("yt-queue-list");
+      const liveQueueSection = document.getElementById("yt-queue-section");
+      const liveQueueNav = document.getElementById("yt-queue-nav");
+      if (!liveQueueList || !liveQueueSection || !liveQueueNav) return; // Panel gerade zu
+
+      if (!gmState.playlistQueue.length) {
+        liveQueueSection.style.display = "none";
+        liveQueueNav.style.display = "none";
+        liveQueueList.innerHTML = "";
         return;
       }
-      queueSection.style.display = "flex";
-      queueNav.style.display = "flex";
-      prevBtn.disabled = _playlistIdx <= 0;
-      queueList.innerHTML = _playlistQueue.map((v, i) => `
-        <div class="yt-queue-item ${i === _playlistIdx ? "now-playing" : ""}" data-idx="${i}">
+      liveQueueSection.style.display = "flex";
+      liveQueueNav.style.display = "flex";
+      const pb = document.getElementById("yt-prev-btn");
+      if (pb) pb.disabled = gmState.playlistIdx <= 0;
+      liveQueueList.innerHTML = gmState.playlistQueue.map((v, i) => `
+        <div class="yt-queue-item ${i === gmState.playlistIdx ? "now-playing" : ""}" data-idx="${i}">
           <img src="${v.thumb}" alt="" />
-          <div class="yt-queue-item-label">${i === _playlistIdx ? "▶ " : ""}${v.label}</div>
-          ${i > _playlistIdx ? `<button class="yt-btn red small yt-queue-remove" data-idx="${i}" title="Aus Queue entfernen">✕</button>` : ""}
+          <div class="yt-queue-item-label">${i === gmState.playlistIdx ? "▶ " : ""}${v.label}</div>
+          ${i > gmState.playlistIdx ? `<button class="yt-btn red small yt-queue-remove" data-idx="${i}" title="Aus Queue entfernen">✕</button>` : ""}
         </div>
       `).join("");
     }
 
-    // Poll for video end and advance queue
+    // Nur EIN Watcher darf gleichzeitig laufen — sonst springen Tracks bei
+    // mehrfachem Fenster-Öffnen/Schließen unerwartet vor.
     function startQueueWatcher() {
-      stopQueueWatcher();
-      _playlistTimer = setInterval(() => {
-        if (!_playlistQueue.length) return stopQueueWatcher();
+      if (gmState.playlistTimer) return;
+      gmState.playlistTimer = setInterval(() => {
+        if (!gmState.playlistQueue.length) return stopQueueWatcher();
         const state = YTSyncPlayer.getPlayerState();
         if (state === 0) advanceQueue(); // ENDED
       }, 2000);
     }
 
     function stopQueueWatcher() {
-      clearInterval(_playlistTimer);
-      _playlistTimer = null;
+      clearInterval(gmState.playlistTimer);
+      gmState.playlistTimer = null;
     }
 
     function playQueueIndex(i) {
-      if (i < 0 || i >= _playlistQueue.length) return;
-      _playlistIdx = i;
-      const track = _playlistQueue[i];
+      if (i < 0 || i >= gmState.playlistQueue.length) return;
+      gmState.playlistIdx = i;
+      const track = gmState.playlistQueue[i];
       loadVideo(track.id, track.label, track.thumb);
       const audioOnly = getMode() === "audio";
-      const vol = parseInt(volSlider.value);
+      const vol = gmState.volume;
       SocketHandler.emit("play", { videoId: track.id, timestamp: 0, volume: vol, audioOnly });
-      setStatus(`▶ [${i + 1}/${_playlistQueue.length}] ${track.label}`);
+      setStatus(`▶ [${i + 1}/${gmState.playlistQueue.length}] ${track.label}`);
       startSeekUpdater();
       renderQueue();
     }
 
     function advanceQueue() {
-      const next = _playlistIdx + 1;
-      if (next >= _playlistQueue.length) {
-        if (_loopQueue) { playQueueIndex(0); return; }
+      const next = gmState.playlistIdx + 1;
+      if (next >= gmState.playlistQueue.length) {
+        if (gmState.loopQueue) { playQueueIndex(0); return; }
         stopQueueWatcher();
         setStatus("✓ Playlist beendet.");
         return;
@@ -418,16 +479,16 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       playQueueIndex(next);
     }
 
-    loopToggle.addEventListener("change", () => { _loopQueue = loopToggle.checked; });
+    loopToggle.addEventListener("change", () => { gmState.loopQueue = loopToggle.checked; });
 
-    prevBtn.addEventListener("click", () => playQueueIndex(_playlistIdx - 1));
+    prevBtn.addEventListener("click", () => playQueueIndex(gmState.playlistIdx - 1));
     nextBtn.addEventListener("click", () => advanceQueue());
 
     queueList.addEventListener("click", (e) => {
       const removeBtn = e.target.closest(".yt-queue-remove");
       if (removeBtn) {
         const idx = parseInt(removeBtn.dataset.idx);
-        _playlistQueue.splice(idx, 1);
+        gmState.playlistQueue.splice(idx, 1);
         renderQueue();
         return;
       }
@@ -435,15 +496,17 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       if (item) playQueueIndex(parseInt(item.dataset.idx));
     });
 
+    renderQueue(); // Zustand aus gmState sofort sichtbar machen
+
     // ── Wiedergabe ──
     playBtn.addEventListener("click", () => {
-      if (!currentVideoId) return;
+      if (!gmState.currentVideoId) return;
       // Einzelnes Video außerhalb einer Queue gestartet — Queue verlassen.
       stopQueueWatcher();
-      _playlistQueue = [];
+      gmState.playlistQueue = [];
       renderQueue();
       const audioOnly = getMode() === "audio";
-      SocketHandler.emit("play", { videoId: currentVideoId, timestamp: 0, volume: parseInt(volSlider.value), audioOnly });
+      SocketHandler.emit("play", { videoId: gmState.currentVideoId, timestamp: 0, volume: gmState.volume, audioOnly });
       setStatus(audioOnly ? "🎵 Ton läuft für alle…" : "▶ Video läuft für alle…");
       startSeekUpdater();
     });
@@ -464,10 +527,12 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       SocketHandler.emit("stop");
       enableControls(false);
       previewRow.style.display = "none";
-      currentVideoId = null;
+      gmState.currentVideoId = null;
+      gmState.currentLabel = null;
+      gmState.currentThumb = null;
       setStatus("⏹ Overlay geschlossen bei allen Spielern.");
       stopQueueWatcher();
-      _playlistQueue = [];
+      gmState.playlistQueue = [];
       renderQueue();
       stopSeekUpdater();
       if (seekBar) { seekBar.value = 0; seekBar.disabled = true; }
@@ -482,6 +547,7 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
 
     volSlider.addEventListener("input", () => {
       const v = parseInt(volSlider.value);
+      gmState.volume = v;
       volLabel.textContent = v;
       SocketHandler.emit("volume", { volume: v });
     });
@@ -496,13 +562,13 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       if (action === "play-playlist") {
         const pl = playlists[pIdx];
         if (!pl.videos.length) return setStatus("⚠ Playlist ist leer.");
-        _playlistQueue = [...pl.videos];
+        gmState.playlistQueue = [...pl.videos];
         playQueueIndex(0);
         startQueueWatcher();
 
       } else if (action === "play-video") {
         stopQueueWatcher();
-        _playlistQueue = [];
+        gmState.playlistQueue = [];
         renderQueue();
         const v = playlists[pIdx].videos[vIdx];
         loadVideo(v.id, v.label, v.thumb);
@@ -526,13 +592,15 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       }
     });
 
-    // ── Soundboard ──
-    const soundboardGrid = el.querySelector("#yt-soundboard-grid");
+    // Falls eine Queue schon vor dem (Wieder-)Öffnen lief, Watcher sicherstellen.
+    if (gmState.playlistQueue.length) startQueueWatcher();
 
+    // ── Soundboard ──
     ambienceVol.addEventListener("input", () => {
       const v = parseInt(ambienceVol.value);
+      gmState.ambienceVolume = v;
       ambienceVolLabel.textContent = v;
-      if (_activeSoundId) SocketHandler.emit("ambience-volume", { volume: v });
+      if (gmState.activeSoundId) SocketHandler.emit("ambience-volume", { volume: v });
     });
 
     el.querySelector("#yt-new-sound-btn").addEventListener("click", async () => {
@@ -557,7 +625,7 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
         if (!confirm("Diesen Sound wirklich entfernen?")) return;
         const soundboard = getSoundboard().filter(s => s.id !== id);
         await saveSoundboard(soundboard);
-        if (_activeSoundId === id) _activeSoundId = null;
+        if (gmState.activeSoundId === id) gmState.activeSoundId = null;
         refreshSoundboard(el);
         return;
       }
@@ -569,15 +637,14 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       const sound = soundboard.find(s => s.id === id);
       if (!sound) return;
 
-      if (_activeSoundId === id) {
+      if (gmState.activeSoundId === id) {
         SocketHandler.emit("ambience-stop");
-        _activeSoundId = null;
+        gmState.activeSoundId = null;
       } else {
-        const vol = parseInt(ambienceVol.value);
-        SocketHandler.emit("ambience-play", { videoId: sound.videoId, volume: vol });
-        _activeSoundId = id;
+        SocketHandler.emit("ambience-play", { videoId: sound.videoId, volume: gmState.ambienceVolume });
+        gmState.activeSoundId = id;
       }
-      soundboardGrid.querySelectorAll(".yt-sound-btn").forEach(b => b.classList.toggle("active", b.dataset.id === _activeSoundId));
+      soundboardGrid.querySelectorAll(".yt-sound-btn").forEach(b => b.classList.toggle("active", b.dataset.id === gmState.activeSoundId));
     });
   }
 }
@@ -627,7 +694,7 @@ function renderSoundboard(soundboard) {
     return `<div class="yt-playlist-empty">Noch keine Sounds. Klicke "＋ Sound hinzufügen".</div>`;
   }
   return soundboard.map(s => `
-    <button class="yt-sound-btn" data-id="${s.id}" style="--sound-color:${s.color}">
+    <button class="yt-sound-btn" data-id="${s.id}" style="--sound-color:${s.color}; --sound-bg:${hexToRgba(s.color, 0.28)}">
       <span class="yt-sound-remove" data-id="${s.id}" title="Entfernen">✕</span>
       <span class="yt-sound-icon">🎧</span>
       <span class="yt-sound-label">${s.label}</span>
