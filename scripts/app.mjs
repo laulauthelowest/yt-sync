@@ -622,7 +622,6 @@ export class YTSyncApp extends foundry.applications.api.ApplicationV2 {
       if (removeBtn) {
         e.stopPropagation();
         const id = removeBtn.dataset.id;
-        if (!confirm("Diesen Sound wirklich entfernen?")) return;
         const soundboard = getSoundboard().filter(s => s.id !== id);
         await saveSoundboard(soundboard);
         if (gmState.activeSoundId === id) gmState.activeSoundId = null;
