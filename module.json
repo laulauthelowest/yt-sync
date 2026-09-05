@@ -1,6 +1,6 @@
 {
   "id": "yt-sync",
-  "title": "YT Sync \u2014 YouTube for the Table",
+  "title": "YT Sync — YouTube for the Table",
   "description": "Stream YouTube videos synchronized to all players directly from Foundry VTT v14.",
   "version": "1.1.0",
   "compatibility": {
