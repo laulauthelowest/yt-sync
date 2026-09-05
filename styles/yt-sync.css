@@ -274,7 +274,7 @@
 .yt-sound-btn {
   position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  background: color-mix(in srgb, var(--sound-color) 25%, #141414);
+  background: var(--sound-bg, #222);
   border: 1px solid var(--sound-color);
   border-radius: 6px; padding: 12px 6px; cursor: pointer;
   color: #eee; transition: filter 0.15s, transform 0.1s;
